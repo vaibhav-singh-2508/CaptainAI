@@ -61,8 +61,8 @@ async def stream_status(job_id: str, request: Request):
                     "stage": state.get("stage", "unknown"),
                     "pct": state.get("pct", 0),
                     "error": state.get("error"),
-                    # Include Whisper segments when ready
-                    **({"segments": state["segments"]} if "segments" in state else {}),
+                    # Include composed subtitles when ready (Sub-task 5)
+                    **({"subtitles": state["subtitles"]} if "subtitles" in state else {}),
                     # Include Granite result when ready (Sub-task 4)
                     **({"granite_result": state["granite_result"]} if "granite_result" in state else {}),
                 })

@@ -154,95 +154,6 @@ _VALID_GENRE_LABELS = {"study", "talk", "song", "vlog"}
 _VALID_STYLE_PRESETS = {"cinematic", "social", "education", "minimal"}
 
 
-# def _validate_and_normalise(data: Any, segment_ids: set[int]) -> dict:
-    """
-    Validate the parsed Granite response against the expected schema.
-
-    Raises ValueError with a descriptive message on any structural mismatch.
-    This keeps _call_ollama clean and makes fallback logic easy to trigger.
-    """
-    if not isinstance(data, dict):
-        raise ValueError(f"Expected a JSON object, got {type(data).__name__}")
-
-    # Granite (2b) sometimes returns flattened "genre.label" / "genre.confidence"
-    # keys instead of a nested "genre" object.  Normalise before validation.
-    if "genre.label" in data or "genre.confidence" in data:
-        data["genre"] = {
-            "label": data.pop("genre.label", "talk"),
-            "confidence": data.pop("genre.confidence", 0.5),
-        }
-
-    for required_key in (
-        "corrected_segments", "language_profile", "genre",
-        "keywords", "style_preset", "summary",
-    ):
-        if required_key not in data:
-            raise ValueError(f"Missing required key: '{required_key}'")
-
-    # corrected_segments
-    corrected = data["corrected_segments"]
-    if not isinstance(corrected, list):
-        raise ValueError("'corrected_segments' must be a list")
-    returned_ids = set()
-    for item in corrected:
-        if not isinstance(item, dict) or "id" not in item or "corrected_text" not in item:
-            raise ValueError(f"Invalid corrected_segment entry: {item!r}")
-        returned_ids.add(int(item["id"]))
-    # Warn if IDs mismatch but don't hard-fail — partial corrections are still useful
-    missing = segment_ids - returned_ids
-    if missing:
-        logger.warning("Granite did not return corrected_text for segment IDs: %s", missing)
-
-    # language_profile
-    lp = data["language_profile"]
-    if not isinstance(lp, dict):
-        raise ValueError("'language_profile' must be an object")
-    for lp_key in ("primary_language", "contains_code_switching"):
-        if lp_key not in lp:
-            raise ValueError(f"'language_profile' missing key: '{lp_key}'")
-
-    # genre
-    genre = data["genre"]
-    if not isinstance(genre, dict):
-        raise ValueError("'genre' must be an object")
-
-    # Granite (2b) sometimes confuses style preset names with genre labels.
-    # Map the known style names back to valid genre labels.
-    _STYLE_TO_GENRE = {
-        "education": "study",
-        "cinematic": "song",
-        "social":    "vlog",
-        "minimal":   "talk",
-    }
-    raw_label = genre.get("label", "")
-    if raw_label not in _VALID_GENRE_LABELS:
-        remapped = _STYLE_TO_GENRE.get(raw_label)
-        if remapped:
-            logger.debug(
-                "Remapping genre label '%s' → '%s' (style/genre confusion)", raw_label, remapped
-            )
-            genre["label"] = remapped
-        else:
-            raise ValueError(
-                f"'genre.label' must be one of {_VALID_GENRE_LABELS}, "
-                f"got {raw_label!r}"
-            )
-
-    # Clamp confidence to [0.0, 1.0]; default to 0.5 if missing
-    try:
-        conf = genre.get("confidence")
-        genre["confidence"] = max(0.0, min(1.0, float(conf))) if conf is not None else 0.5
-    except (TypeError, ValueError):
-        genre["confidence"] = 0.5
-
-    # style_preset
-    if data["style_preset"] not in _VALID_STYLE_PRESETS:
-        raise ValueError(
-            f"'style_preset' must be one of {_VALID_STYLE_PRESETS}, "
-            f"got {data['style_preset']!r}"
-        )
-
-    return data
 def _validate_and_normalise(data: Any, segment_ids: set[int], segments: list[dict]) -> dict:
     """
     Validate the parsed Granite response against the expected schema.
@@ -375,7 +286,7 @@ async def process(segments: list[dict], job_dir: str) -> dict:
             config.OLLAMA_MODEL, config.OLLAMA_URL, len(segments),
         )
         raw_result = _call_ollama(prompt_segments_json)
-        result = _validate_and_normalise(raw_result, segment_ids)
+        result = _validate_and_normalise(raw_result, segment_ids, segments)
         logger.info(
             "Granite response OK — genre=%s confidence=%.2f style=%s "
             "code_switching=%s keywords=%d",

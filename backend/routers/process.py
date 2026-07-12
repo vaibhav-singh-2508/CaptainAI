@@ -1,5 +1,5 @@
 """
-Process router — Sub-tasks 3 & 4.
+Process router — Sub-tasks 3, 4 & 5.
 
 POST /process/{job_id}
   - Looks up the uploaded file in TMP_DIR/{job_id}/
@@ -7,14 +7,11 @@ POST /process/{job_id}
   - Returns immediately with {"job_id": ..., "status": "processing"}
 
 Pipeline stages:
-  extracting_audio   pct=10
-  transcribing       pct=30
-  processing_granite pct=60   ← Sub-task 4 addition
-  ready              pct=100  (with granite_result payload)
-
-Later sub-tasks (5) will extend the pipeline to add:
-  composing_subtitles pct=75
-  ready               pct=100  (with full ProcessedResult)
+  extracting_audio    pct=10
+  transcribing        pct=30
+  processing_granite  pct=60
+  composing_subtitles pct=75  ← Sub-task 5 addition
+  ready               pct=100 (with subtitles + granite_result payload)
 """
 
 import asyncio
@@ -25,7 +22,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request
 
 import config
-from services import audio_extractor, transcriber, granite_processor
+from services import audio_extractor, transcriber, granite_processor, subtitle_composer
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +46,7 @@ def _find_original(job_dir: Path) -> Path:
 
 async def _run_pipeline(app_state, job_id: str) -> None:
     """
-    Background task: audio extraction → transcription → Granite processing.
+    Background task: audio extraction → transcription → Granite → subtitles.
 
     Updates app_state.jobs[job_id] at each stage so the SSE stream can
     report live progress.
@@ -113,11 +110,22 @@ async def _run_pipeline(app_state, job_id: str) -> None:
             str(job_dir),
         )
 
-        # ── 5. Done — mark ready with both whisper segments and granite result
+        # ── 5. Subtitle composition (pct=75) ──────────────────────────────
+        set_stage("composing_subtitles", 75)
+
+        try:
+            subtitles = subtitle_composer.compose(
+                segments, granite_result, str(job_dir)
+            )
+        except Exception as exc:
+            set_error(f"Subtitle composition failed: {exc}")
+            return
+
+        # ── 6. Done — ready with all artefacts ────────────────────────────
         set_stage(
             "ready",
             100,
-            segments=segments,
+            subtitles=subtitles,
             granite_result=granite_result,
         )
 
