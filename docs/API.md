@@ -7,12 +7,23 @@ Base URL: `http://localhost:8000`
 ## `GET /health`
 
 Health check. Returns `200 OK` when the server is running.
+Also reports the Whisper inference device selected at startup.
 
 ### Response
 
 ```json
-{ "status": "ok" }
+{
+  "status": "ok",
+  "whisper_device": "cuda",
+  "whisper_compute_type": "float16"
+}
 ```
+
+| Field | Type | Description |
+|---|---|---|
+| `status` | string | Always `"ok"` when the server is up |
+| `whisper_device` | string | `"cuda"` (GPU) or `"cpu"` (fallback) |
+| `whisper_compute_type` | string | `"float16"` (CUDA) or `"int8"` (CPU) |
 
 ---
 
@@ -69,17 +80,120 @@ All error responses use HTTP **422 Unprocessable Entity** with a JSON body:
 
 ## `POST /process/{job_id}`
 
-_(Sub-task 3 — not yet implemented)_
+Start the processing pipeline for an uploaded job.
+Returns immediately — the pipeline runs in the background.
+Progress is streamed via `GET /status/{job_id}`.
 
-Returns **501 Not Implemented**.
+### Path parameter
+
+| Parameter | Description |
+|---|---|
+| `job_id` | UUID returned by `POST /upload` |
+
+### Success Response
+
+**HTTP 200 OK**
+
+```json
+{
+  "job_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "status": "processing"
+}
+```
+
+### Error Responses
+
+| Condition | HTTP | `detail` example |
+|---|---|---|
+| Job directory not found (not uploaded first) | 404 | `"Job '…' not found. Upload a file first."` |
+| Job already being processed | 409 | `"Job '…' is already being processed (stage: transcribing)."` |
 
 ---
 
 ## `GET /status/{job_id}`
 
-_(Sub-task 3 — not yet implemented)_
+Stream pipeline progress as **Server-Sent Events (SSE)**.
 
-Returns **501 Not Implemented**.
+- **Content-Type:** `text/event-stream`
+- Events are emitted every **500 ms**.
+- The stream closes automatically when `stage` is `"ready"` or `"error"`.
+- The stream closes after **10 minutes** if the pipeline never resolves (guard against crashed jobs).
+
+### Usage
+
+```js
+const source = new EventSource(`http://localhost:8000/status/${jobId}`)
+source.onmessage = (e) => {
+  const state = JSON.parse(e.data)
+  // state.stage, state.pct, state.error, state.segments (when ready)
+}
+```
+
+### SSE event format
+
+Each event is a single `data:` line containing a JSON object:
+
+```
+data: {"stage": "transcribing", "pct": 30, "error": null}
+
+```
+
+_(Note the required blank line after each event per the SSE specification.)_
+
+#### Event fields
+
+| Field | Type | Present | Description |
+|---|---|---|---|
+| `stage` | string | always | Current pipeline stage (see table below) |
+| `pct` | integer | always | Progress percentage 0–100 |
+| `error` | string \| null | always | Error message, or `null` if no error |
+| `segments` | array | only when `stage == "ready"` | Raw Whisper transcript segments (see schema below) |
+
+#### Pipeline stages
+
+| `stage` | `pct` | Description |
+|---|---|---|
+| `waiting` | 0 | Job state not yet seeded (brief race window between POST and SSE open) |
+| `queued` | 0 | Job accepted, pipeline not yet started |
+| `extracting_audio` | 10 | FFmpeg extracting / normalising audio to 16 kHz mono WAV |
+| `transcribing` | 30 | faster-whisper transcribing audio |
+| `ready` | 100 | Pipeline complete; `segments` array included in this event |
+| `error` | 0 | Pipeline failed; `error` field contains the reason |
+
+---
+
+## `whisper_segments.json` — schema
+
+Saved to `{TMP_DIR}/{job_id}/whisper_segments.json` after transcription.
+Also delivered inline in the SSE `ready` event as the `segments` field.
+
+```json
+[
+  {
+    "id": 1,
+    "start": 0.0,
+    "end": 4.96,
+    "text": "Hello and welcome to the show."
+  },
+  {
+    "id": 2,
+    "start": 4.96,
+    "end": 9.12,
+    "text": "Aaj hum baat karenge AI ke baare mein."
+  }
+]
+```
+
+#### Segment fields
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | integer | 1-based segment index assigned by Whisper |
+| `start` | number | Segment start time in seconds (rounded to 3 decimal places) |
+| `end` | number | Segment end time in seconds (rounded to 3 decimal places) |
+| `text` | string | Raw Whisper transcript — no grammar correction applied at this stage |
+
+**Language detection:** Whisper uses `language=None` (auto-detect). For Hinglish / code-switched audio the model will produce mixed-script text directly in `text`. Granite processing (Sub-task 4) adds the per-segment `language` tag (`"en"`, `"hi"`, or `"hi-en"`) and a `corrected_text` field.
 
 ---
 
@@ -101,12 +215,19 @@ Returns **501 Not Implemented**.
 
 ## File Storage
 
-Uploaded files are stored at:
+All job files live under one directory per job:
 
 ```
-{TMP_DIR}/{job_id}/original.{ext}
+{TMP_DIR}/{job_id}/
+  original.{ext}          — uploaded source file (mp4, mp3, mov, webm)
+  audio.wav               — 16 kHz mono PCM WAV extracted by FFmpeg (Sub-task 3)
+  whisper_segments.json   — raw Whisper transcript (Sub-task 3)
+  granite_result.json     — Granite-corrected segments + metadata (Sub-task 4)
+  subtitles.srt           — generated SRT file (Sub-task 5)
+  transcript.txt          — plain-text transcript (Sub-task 5)
+  output.mp4              — burned-in video (Sub-task 7)
 ```
 
-Default `TMP_DIR`: `/tmp/captainai`
+Default `TMP_DIR`: `/tmp/captainai` (override via `TMP_DIR` env var)
 
 Job directories are automatically cleaned up after 30 minutes (implemented in Sub-task 7).
