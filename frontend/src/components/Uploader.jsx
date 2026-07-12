@@ -4,7 +4,7 @@ import axios from 'axios'
 const API_BASE = 'http://localhost:8000'
 
 const ALLOWED_EXTENSIONS = ['.mp4', '.mp3', '.mov', '.webm']
-const ALLOWED_MIME_TYPES = [
+const _ALLOWED_MIME_TYPES = [
   'video/mp4',
   'video/quicktime',
   'video/webm',
@@ -120,16 +120,9 @@ export default function Uploader({ onUploadSuccess }) {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-6">
-      {/* Header */}
-      <div className="mb-8 text-center">
-        <h1 className="text-4xl font-bold text-gray-900 tracking-tight">CaptainAI</h1>
-        <p className="mt-1 text-gray-500 text-lg">AI-powered subtitle intelligence · Powered by IBM watsonx</p>
-      </div>
-
-      <div className="w-full max-w-lg bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
-        <h2 className="text-xl font-semibold text-gray-800 mb-1">Upload a video or audio file</h2>
-        <p className="text-sm text-gray-400 mb-6">Supported formats: MP4, MP3, MOV, WEBM</p>
+    <div className="w-full max-w-lg bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
+      <h2 className="text-xl font-semibold text-gray-800 mb-1">Upload a video or audio file</h2>
+      <p className="text-sm text-gray-400 mb-6">Supported formats: MP4, MP3, MOV, WEBM</p>
 
         {/* Drop zone */}
         <div
@@ -252,11 +245,7 @@ export default function Uploader({ onUploadSuccess }) {
               Upload another file
             </button>
           )}
-        </div>
       </div>
-
-      {/* Footer attribution */}
-      <p className="mt-8 text-xs text-gray-400">Powered by IBM Granite on watsonx</p>
     </div>
   )
 }
