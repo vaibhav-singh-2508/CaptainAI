@@ -3,15 +3,19 @@
  *
  * Stages in order:
  *   queued → extracting_audio → transcribing → processing_granite
- *   → composing_subtitles → ready
+ *   → composing_subtitles → [translating] → ready
+ *
+ * The "translating" step only appears when subtitle_output="en" and the
+ * spoken language is detected as Hindi.  It is omitted for English-only jobs.
  */
 
 const STAGES = [
   { key: 'upload_complete',    label: 'Upload Complete',      pctThreshold: 0   },
   { key: 'extracting_audio',   label: 'Extracting Audio',     pctThreshold: 10  },
   { key: 'transcribing',       label: 'Transcribing',         pctThreshold: 30  },
-  { key: 'processing_granite', label: 'Processing Granite',   pctThreshold: 60  },
+  { key: 'processing_granite', label: 'AI Analysis',          pctThreshold: 60  },
   { key: 'composing_subtitles',label: 'Composing Subtitles',  pctThreshold: 75  },
+  { key: 'translating',        label: 'Translating',          pctThreshold: 88  },
   { key: 'ready',              label: 'Ready',                pctThreshold: 100 },
 ]
 

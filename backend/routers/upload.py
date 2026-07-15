@@ -3,16 +3,20 @@ Upload router — Sub-task 2.
 
 POST /upload
   - Accepts multipart/form-data with a 'file' field.
+  - Accepts optional spoken_language and subtitle_output fields.
   - Validates extension, size, and media integrity (ffprobe).
   - Saves to TMP_DIR/{job_id}/original.{ext}.
+  - Persists job_config.json with language preferences.
   - Returns { job_id, filename, duration_seconds }.
 """
 
+import json
 import uuid
 from pathlib import Path
+from typing import Literal
 
 import aiofiles
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, Form, HTTPException, UploadFile, File
 from fastapi.responses import JSONResponse
 
 import config
@@ -25,14 +29,38 @@ _CHUNK_SIZE = 1024 * 1024
 
 
 @router.post("/upload")
-async def upload_file(file: UploadFile = File(...)):
+async def upload_file(
+    file: UploadFile = File(...),
+    spoken_language: str = Form("auto"),
+    subtitle_output: str = Form("original"),
+):
     """
     Upload a media file (MP4, MP3, MOV, WEBM).
+
+    Args:
+        spoken_language: "auto" | "en" | "hi" — passed to Whisper.
+                         "auto" = language auto-detection (default).
+        subtitle_output: "original" | "en" — desired subtitle language.
+                         "en" triggers Hindi→English translation when the
+                         detected/selected spoken language is Hindi.
 
     Returns:
         200: { "job_id": str, "filename": str, "duration_seconds": float }
         422: Validation error (bad extension, oversized, corrupted, etc.)
     """
+    # Validate language fields
+    valid_spoken = {"auto", "en", "hi"}
+    valid_output = {"original", "en"}
+    if spoken_language not in valid_spoken:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid spoken_language '{spoken_language}'. Must be one of: {sorted(valid_spoken)}.",
+        )
+    if subtitle_output not in valid_output:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid subtitle_output '{subtitle_output}'. Must be one of: {sorted(valid_output)}.",
+        )
     # --- Derive and validate extension early (before writing to disk) ---
     original_filename = file.filename or ""
     ext = Path(original_filename).suffix.lower()
@@ -97,6 +125,15 @@ async def upload_file(file: UploadFile = File(...)):
         except OSError:
             pass
         raise HTTPException(status_code=422, detail=str(exc))
+
+    # Persist language preferences so the process router can read them
+    job_config = {
+        "spoken_language": spoken_language,
+        "subtitle_output": subtitle_output,
+    }
+    (job_dir / "job_config.json").write_text(
+        json.dumps(job_config, indent=2), encoding="utf-8"
+    )
 
     return {
         "job_id": job_id,

@@ -88,7 +88,7 @@ function reducer(state, action) {
         ...state,
         segments: state.segments.map((seg) =>
           seg.id === action.id
-            ? { ...seg, corrected_text: action.text }
+            ? { ...seg, text: action.text }
             : seg
         ),
       }

@@ -73,7 +73,7 @@ export default function PreviewPlayer({ videoUrl, segments, style, seekTo, onTim
 
     const t = video.currentTime
     const active = segments.find((s) => t >= s.start && t < s.end)
-    setActiveText(active ? active.corrected_text : '')
+    setActiveText(active ? active.text : '')
 
     if (onTimeUpdate) onTimeUpdate(t)
   }

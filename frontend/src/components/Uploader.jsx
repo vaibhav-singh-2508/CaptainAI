@@ -22,6 +22,21 @@ function formatSize(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+// ── Language option definitions ────────────────────────────────────────────
+const SPOKEN_LANGUAGE_OPTIONS = [
+  { value: 'auto', label: 'Auto Detect', description: 'Let Whisper detect the language automatically' },
+  { value: 'en',   label: 'English',     description: null },
+  { value: 'hi',   label: 'Hindi',       description: null },
+  // TODO: Future Enhancement:
+  // Support Hinglish transcription and subtitle generation while preserving
+  // mixed-language speech and allowing optional translation.
+]
+
+const SUBTITLE_OUTPUT_OPTIONS = [
+  { value: 'original', label: 'Original Language', description: 'Subtitles in the spoken language' },
+  { value: 'en',       label: 'English',            description: 'Translate to English (Hindi only)' },
+]
+
 export default function Uploader({ onUploadSuccess }) {
   const [isDragOver, setIsDragOver] = useState(false)
   const [selectedFile, setSelectedFile] = useState(null)
@@ -29,6 +44,8 @@ export default function Uploader({ onUploadSuccess }) {
   const [progress, setProgress] = useState(0)
   const [errorMessage, setErrorMessage] = useState('')
   const [uploadResult, setUploadResult] = useState(null)
+  const [spokenLanguage, setSpokenLanguage] = useState('auto')
+  const [subtitleOutput, setSubtitleOutput] = useState('original')
   const inputRef = useRef(null)
 
   const resetState = () => {
@@ -37,6 +54,8 @@ export default function Uploader({ onUploadSuccess }) {
     setProgress(0)
     setErrorMessage('')
     setUploadResult(null)
+    setSpokenLanguage('auto')
+    setSubtitleOutput('original')
   }
 
   const validateFileLocally = (file) => {
@@ -89,6 +108,8 @@ export default function Uploader({ onUploadSuccess }) {
 
     const formData = new FormData()
     formData.append('file', selectedFile)
+    formData.append('spoken_language', spokenLanguage)
+    formData.append('subtitle_output', subtitleOutput)
 
     setUploadState('uploading')
     setProgress(0)
@@ -118,6 +139,19 @@ export default function Uploader({ onUploadSuccess }) {
       setUploadState('error')
     }
   }
+
+  // When spoken language is English, force subtitle output back to original
+  // (English → English translation is a no-op; keep UI consistent)
+  const handleSpokenLanguageChange = (value) => {
+    setSpokenLanguage(value)
+    if (value === 'en') {
+      setSubtitleOutput('original')
+    }
+  }
+
+  // Determine whether the "English" subtitle output option should be available.
+  // Translation is only meaningful when Hindi is selected or auto (may be Hindi).
+  const canTranslate = spokenLanguage === 'hi' || spokenLanguage === 'auto'
 
   return (
     <div className="w-full max-w-lg bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
@@ -168,6 +202,85 @@ export default function Uploader({ onUploadSuccess }) {
               </p>
               <p className="text-xs text-gray-400 mt-1">Max file size: set by server config</p>
             </div>
+          )}
+        </div>
+
+        {/* ── Spoken Language ──────────────────────────────────────────── */}
+        <div className="mt-5">
+          <p className="text-sm font-medium text-gray-700 mb-2">Spoken Language</p>
+          <div className="flex flex-col gap-2">
+            {SPOKEN_LANGUAGE_OPTIONS.map((opt) => (
+              <label
+                key={opt.value}
+                className={[
+                  'flex items-start gap-3 rounded-lg border px-3 py-2.5 cursor-pointer transition-colors',
+                  spokenLanguage === opt.value
+                    ? 'border-blue-400 bg-blue-50'
+                    : 'border-gray-200 hover:border-blue-200 hover:bg-gray-50',
+                ].join(' ')}
+              >
+                <input
+                  type="radio"
+                  name="spoken_language"
+                  value={opt.value}
+                  checked={spokenLanguage === opt.value}
+                  onChange={() => handleSpokenLanguageChange(opt.value)}
+                  className="mt-0.5 accent-blue-600"
+                />
+                <div>
+                  <span className="text-sm font-medium text-gray-800">{opt.label}</span>
+                  {opt.description && (
+                    <span className="ml-2 text-xs text-gray-400">{opt.description}</span>
+                  )}
+                </div>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        {/* ── Subtitle Output ──────────────────────────────────────────── */}
+        <div className="mt-5">
+          <p className="text-sm font-medium text-gray-700 mb-2">Subtitle Output</p>
+          <div className="flex flex-col gap-2">
+            {SUBTITLE_OUTPUT_OPTIONS.map((opt) => {
+              const isDisabled = opt.value === 'en' && !canTranslate
+              return (
+                <label
+                  key={opt.value}
+                  className={[
+                    'flex items-start gap-3 rounded-lg border px-3 py-2.5 transition-colors',
+                    isDisabled
+                      ? 'border-gray-100 bg-gray-50 cursor-not-allowed opacity-50'
+                      : 'cursor-pointer ' + (
+                          subtitleOutput === opt.value
+                            ? 'border-blue-400 bg-blue-50'
+                            : 'border-gray-200 hover:border-blue-200 hover:bg-gray-50'
+                        ),
+                  ].join(' ')}
+                >
+                  <input
+                    type="radio"
+                    name="subtitle_output"
+                    value={opt.value}
+                    checked={subtitleOutput === opt.value}
+                    disabled={isDisabled}
+                    onChange={() => !isDisabled && setSubtitleOutput(opt.value)}
+                    className="mt-0.5 accent-blue-600"
+                  />
+                  <div>
+                    <span className="text-sm font-medium text-gray-800">{opt.label}</span>
+                    {opt.description && (
+                      <span className="ml-2 text-xs text-gray-400">{opt.description}</span>
+                    )}
+                  </div>
+                </label>
+              )
+            })}
+          </div>
+          {subtitleOutput === 'en' && spokenLanguage === 'auto' && (
+            <p className="mt-2 text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-3 py-1.5">
+              Auto Detect + English output: translation will only run if the spoken language is detected as Hindi.
+            </p>
           )}
         </div>
 

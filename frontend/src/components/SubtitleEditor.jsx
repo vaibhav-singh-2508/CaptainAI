@@ -69,14 +69,14 @@ export default function SubtitleEditor({ segments, onTextChange, onSeek, activeS
               <span className="text-xs text-gray-400 font-mono">
                 {formatTime(seg.start)} → {formatTime(seg.end)}
               </span>
-              <LangBadge lang={seg.language} />
+              {seg.language && <LangBadge lang={seg.language} />}
             </div>
 
-            {/* Editable corrected text */}
+            {/* Editable subtitle text (field name is "text" in subtitle_data.json) */}
             <textarea
               className="w-full text-sm text-gray-800 bg-transparent resize-none border-none outline-none focus:ring-0 leading-snug"
               rows={2}
-              value={seg.corrected_text}
+              value={seg.text}
               onChange={(e) => {
                 e.stopPropagation()
                 if (onTextChange) onTextChange(seg.id, e.target.value)
@@ -84,13 +84,6 @@ export default function SubtitleEditor({ segments, onTextChange, onSeek, activeS
               onClick={(e) => e.stopPropagation()}
               spellCheck={false}
             />
-
-            {/* Original Whisper text — read only diff view */}
-            {seg.text && seg.text !== seg.corrected_text && (
-              <p className="mt-1 text-xs text-gray-400 italic line-through leading-snug">
-                {seg.text}
-              </p>
-            )}
           </div>
         )
       })}

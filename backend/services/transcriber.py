@@ -42,9 +42,15 @@ def get_model():
     return _model
 
 
-def _transcribe_sync(audio_path: str) -> list[dict]:
+def _transcribe_sync(audio_path: str, language: str | None = None) -> list[dict]:
     """
     Blocking transcription call — runs inside a thread executor.
+
+    Args:
+        audio_path: Path to the 16 kHz mono WAV file.
+        language:   ISO 639-1 language code to force ("en", "hi"), or None for
+                    auto-detection.  Auto-detection is the default and is
+                    required for Hinglish / code-switched content.
 
     Returns a list of segment dicts: [{"id": int, "start": float,
     "end": float, "text": str}, ...]
@@ -54,7 +60,7 @@ def _transcribe_sync(audio_path: str) -> list[dict]:
 
     segments_iter, info = _model.transcribe(
         audio_path,
-        language=None,          # auto-detect — essential for Hinglish
+        language=language,      # None = auto-detect; "en"/"hi" = forced
         task="transcribe",
         word_timestamps=False,  # segment-level only
         beam_size=5,
@@ -79,7 +85,11 @@ def _transcribe_sync(audio_path: str) -> list[dict]:
     return segments
 
 
-async def transcribe(audio_path: str, job_dir: str) -> list[dict]:
+async def transcribe(
+    audio_path: str,
+    job_dir: str,
+    language: str | None = None,
+) -> list[dict]:
     """
     Transcribe *audio_path* asynchronously (non-blocking to the event loop).
 
@@ -88,6 +98,8 @@ async def transcribe(audio_path: str, job_dir: str) -> list[dict]:
     Args:
         audio_path: Path to the 16 kHz mono WAV file.
         job_dir:    Path to the job directory where JSON will be saved.
+        language:   ISO 639-1 code ("en", "hi") to force, or None for
+                    auto-detection (default).
 
     Returns:
         List of segment dicts with id, start, end, text.
@@ -100,6 +112,7 @@ async def transcribe(audio_path: str, job_dir: str) -> list[dict]:
         _executor,
         _transcribe_sync,
         audio_path,
+        language,
     )
 
     # Persist raw Whisper output to disk

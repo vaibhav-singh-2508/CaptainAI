@@ -166,6 +166,32 @@ def _write_txt(subtitles: list[dict], output_path: Path) -> None:
     output_path.write_text(transcript, encoding="utf-8")
 
 
+# ── Save-only helper (used after translation) ─────────────────────────────────
+
+def save_subtitles(subtitles: list[dict], job_dir: str) -> None:
+    """
+    Persist *subtitles* to ``subtitle_data.json``, ``subtitles.srt``, and
+    ``transcript.txt`` in *job_dir*.
+
+    Called after Hindi→English translation to overwrite the original-language
+    files with the translated versions.  The subtitle structure must match the
+    format produced by ``compose()`` (id, start, end, text keys).
+    """
+    job_path = Path(job_dir)
+
+    subtitle_data_path = job_path / "subtitle_data.json"
+    subtitle_data_path.write_text(
+        json.dumps(subtitles, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    _write_srt(subtitles, job_path / "subtitles.srt")
+    _write_txt(subtitles, job_path / "transcript.txt")
+    logger.info(
+        "save_subtitles: overwrote subtitle files with %d translated subtitle(s)",
+        len(subtitles),
+    )
+
+
 # ── File-based entry point (loads from disk) ──────────────────────────────────
 
 def compose_from_job_dir(job_dir: str) -> list[dict]:

@@ -57,7 +57,7 @@ function Header({ onReset, showReset }) {
           <span className="text-lg font-bold text-gray-900 tracking-tight">CaptainAI</span>
         </div>
         <span className="hidden sm:inline text-gray-300">|</span>
-        <span className="hidden sm:inline text-sm text-gray-400">AI Subtitle Intelligence · IBM watsonx</span>
+        <span className="hidden sm:inline text-sm text-gray-400">AI Subtitle Intelligence · IBM Granite (Ollama)</span>
       </div>
 
       {showReset && (
@@ -169,7 +169,7 @@ export default function App() {
             <Uploader onUploadSuccess={handleUploadSuccess} />
             {/* Attribution footer */}
             <p className="mt-6 text-xs text-gray-400 text-center">
-              Powered by IBM Granite on watsonx · Built with CaptainAI
+              Powered by IBM Granite via Ollama · Built with CaptainAI
             </p>
           </div>
         )}
@@ -191,12 +191,12 @@ export default function App() {
 
             <ProgressTracker stage={stage} pct={pct} error={sseError} />
 
-            {/* IBM watsonx attribution badge */}
+            {/* Granite/Ollama attribution badge */}
             <div className="mt-4 flex items-center gap-2 text-xs text-gray-400 border border-gray-200 rounded-full px-4 py-1.5 bg-white">
               <svg className="w-4 h-4 text-blue-500" fill="currentColor" viewBox="0 0 24 24">
                 <circle cx="12" cy="12" r="10"/>
               </svg>
-              AI processing by IBM Granite on watsonx
+              AI processing by IBM Granite (local Ollama)
             </div>
           </div>
         )}
@@ -272,8 +272,8 @@ export default function App() {
                 <p className="text-xs text-gray-400">
                   Subtitles powered by{' '}
                   <span className="font-semibold text-blue-500">IBM Granite</span>
-                  {' '}on{' '}
-                  <span className="font-semibold">watsonx</span>
+                  {' '}via{' '}
+                  <span className="font-semibold">Ollama</span>
                 </p>
                 <p className="text-xs text-gray-300 mt-0.5">CaptainAI · IBM Challenge Submission</p>
               </div>
