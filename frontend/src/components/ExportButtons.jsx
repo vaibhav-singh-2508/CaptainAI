@@ -1,12 +1,15 @@
 /**
- * ExportButtons — triggers POST /export/{job_id} for SRT and TXT exports.
+ * ExportButtons — triggers POST /export/{job_id} for SRT, TXT, and MP4 exports.
  *
- * Sub-task 6 scope:
+ * Sub-task 7: All three export formats are now fully implemented.
  *   - Export SRT: calls POST /export with formats=["srt"]
  *   - Export TXT: calls POST /export with formats=["txt"]
- *   - Export MP4 button is shown but marked "Coming soon" (Sub-task 7)
+ *   - Export MP4: calls POST /export with formats=["mp4"] — runs FFmpeg burn-in
+ *                 on the backend; may take 30–90 seconds for longer videos.
  *
- * No FFmpeg burn-in in this sub-task.
+ * The current segments and style (including any manual overrides the user made
+ * in StylePanel) are sent with every export request so the output exactly
+ * matches what the user configured.
  */
 
 import { useState } from 'react'
@@ -31,10 +34,22 @@ function Spinner() {
   )
 }
 
+function CheckIcon() {
+  return (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+    </svg>
+  )
+}
+
 export default function ExportButtons({ jobId, segments, style }) {
   const [loadingSrt, setLoadingSrt] = useState(false)
   const [loadingTxt, setLoadingTxt] = useState(false)
-  const [exportError, setExportError]  = useState(null)
+  const [loadingMp4, setLoadingMp4] = useState(false)
+  const [successSrt, setSuccessSrt] = useState(false)
+  const [successTxt, setSuccessTxt] = useState(false)
+  const [successMp4, setSuccessMp4] = useState(false)
+  const [exportError, setExportError] = useState(null)
 
   const triggerDownload = (url, filename) => {
     const a = document.createElement('a')
@@ -45,23 +60,24 @@ export default function ExportButtons({ jobId, segments, style }) {
     document.body.removeChild(a)
   }
 
-  const handleExport = async (formats, setLoading, filename) => {
+  const handleExport = async (formats, setLoading, setSuccess, filename) => {
     if (!jobId || !segments || !style) return
     setLoading(true)
+    setSuccess(false)
     setExportError(null)
 
     try {
       const response = await axios.post(`${API_BASE}/export/${jobId}`, {
         segments,
         style: {
-          preset_name:   style.preset_name,
-          font_name:     style.font_name,
-          font_size:     style.font_size,
-          primary_color: style.primary_color,
-          outline_color: style.outline_color,
-          position:      style.position,
+          preset_name:    style.preset_name,
+          font_name:      style.font_name,
+          font_size:      style.font_size,
+          primary_color:  style.primary_color,
+          outline_color:  style.outline_color,
+          position:       style.position,
           background_box: style.background_box,
-          bold:          style.bold,
+          bold:           style.bold,
         },
         formats,
       })
@@ -72,11 +88,23 @@ export default function ExportButtons({ jobId, segments, style }) {
 
       if (path) {
         triggerDownload(`${API_BASE}${path}`, filename)
+        setSuccess(true)
+        // Clear the success indicator after 3 seconds
+        setTimeout(() => setSuccess(false), 3000)
       } else {
         setExportError(`Export succeeded but no download URL was returned for ${fmt}.`)
       }
     } catch (err) {
-      const detail = err.response?.data?.detail || err.message || 'Export failed.'
+      const raw = err.response?.data?.detail
+      let detail
+      if (Array.isArray(raw)) {
+        // FastAPI validation error: array of { loc, msg, type } objects
+        detail = raw.map((e) => `${e.loc?.slice(1).join(' → ') ?? 'field'}: ${e.msg}`).join('; ')
+      } else if (typeof raw === 'string') {
+        detail = raw
+      } else {
+        detail = err.message || 'Export failed.'
+      }
       setExportError(detail)
     } finally {
       setLoading(false)
@@ -92,45 +120,67 @@ export default function ExportButtons({ jobId, segments, style }) {
       <div className="flex flex-wrap gap-2">
         {/* Export SRT */}
         <button
-          onClick={() => handleExport(['srt'], setLoadingSrt, 'subtitles.srt')}
+          onClick={() => handleExport(['srt'], setLoadingSrt, setSuccessSrt, 'subtitles.srt')}
           disabled={!canExport || loadingSrt}
+          title="Download SRT subtitle file"
           className={[
             'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border transition-all',
-            canExport && !loadingSrt
+            successSrt
+              ? 'bg-green-50 border-green-400 text-green-700'
+              : canExport && !loadingSrt
               ? 'bg-white border-gray-300 text-gray-700 hover:border-blue-400 hover:text-blue-600'
               : 'bg-gray-50 border-gray-200 text-gray-400 cursor-not-allowed',
           ].join(' ')}
         >
-          {loadingSrt ? <Spinner /> : <DownloadIcon />}
+          {loadingSrt ? <Spinner /> : successSrt ? <CheckIcon /> : <DownloadIcon />}
           Export SRT
         </button>
 
         {/* Export TXT */}
         <button
-          onClick={() => handleExport(['txt'], setLoadingTxt, 'transcript.txt')}
+          onClick={() => handleExport(['txt'], setLoadingTxt, setSuccessTxt, 'transcript.txt')}
           disabled={!canExport || loadingTxt}
+          title="Download plain-text transcript"
           className={[
             'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border transition-all',
-            canExport && !loadingTxt
+            successTxt
+              ? 'bg-green-50 border-green-400 text-green-700'
+              : canExport && !loadingTxt
               ? 'bg-white border-gray-300 text-gray-700 hover:border-blue-400 hover:text-blue-600'
               : 'bg-gray-50 border-gray-200 text-gray-400 cursor-not-allowed',
           ].join(' ')}
         >
-          {loadingTxt ? <Spinner /> : <DownloadIcon />}
+          {loadingTxt ? <Spinner /> : successTxt ? <CheckIcon /> : <DownloadIcon />}
           Export TXT
         </button>
 
-        {/* Export MP4 — Sub-task 7 */}
+        {/* Export MP4 — FFmpeg burn-in (Sub-task 7) */}
         <button
-          disabled
-          title="MP4 burn-in will be available in Sub-task 7"
-          className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border border-gray-200 bg-gray-50 text-gray-400 cursor-not-allowed"
+          onClick={() => handleExport(['mp4'], setLoadingMp4, setSuccessMp4, 'output.mp4')}
+          disabled={!canExport || loadingMp4}
+          title="Burn subtitles into the video and download MP4 (may take 30–90 seconds)"
+          className={[
+            'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border transition-all',
+            successMp4
+              ? 'bg-green-50 border-green-400 text-green-700'
+              : loadingMp4
+              ? 'bg-blue-50 border-blue-300 text-blue-600 cursor-wait'
+              : canExport
+              ? 'bg-blue-600 border-blue-600 text-white hover:bg-blue-700'
+              : 'bg-gray-50 border-gray-200 text-gray-400 cursor-not-allowed',
+          ].join(' ')}
         >
-          <DownloadIcon />
-          Export MP4
-          <span className="text-xs bg-gray-200 text-gray-500 px-1.5 py-0.5 rounded ml-1">Soon</span>
+          {loadingMp4 ? <Spinner /> : successMp4 ? <CheckIcon /> : <DownloadIcon />}
+          {loadingMp4 ? 'Processing…' : successMp4 ? 'Done!' : 'Export MP4'}
         </button>
       </div>
+
+      {/* MP4 encoding hint */}
+      {loadingMp4 && (
+        <p className="text-xs text-blue-600 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
+          Burning subtitles into video… This may take 30–90 seconds depending on video length.
+        </p>
+      )}
 
       {/* Error */}
       {exportError && (

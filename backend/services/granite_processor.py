@@ -40,6 +40,7 @@ _SYSTEM_PROMPT = (
 
 _USER_PROMPT_TEMPLATE = """\
 You are processing video subtitle segments. Return a JSON object with these 6 keys.
+CRITICAL: NEVER translate any word from one language to another. If the speaker said a word in Hindi, keep it in Hindi (in Latin/Roman script as transcribed). If they said a word in English, keep it in English. Your ONLY job is fixing grammar, spelling, and removing filler words — you must NOT change the language of any word. Preserve the exact language mix exactly as spoken.
 
 INPUT SEGMENTS:
 {segments_json}

@@ -116,7 +116,22 @@ class ProcessedResult(BaseModel):
     granite_summary: str
 
 
+class ExportSegment(BaseModel):
+    """
+    Minimal segment payload sent by the frontend for export.
+
+    The export pipeline only needs id, start, end, and text.
+    corrected_text and language are NOT required here — they are pipeline
+    fields used by Sub-tasks 4/5 and are absent from the editor's outgoing
+    payload.  Using a dedicated model keeps the shared Segment model intact.
+    """
+    id: int
+    start: float
+    end: float
+    text: str
+
+
 class ExportRequest(BaseModel):
-    segments: list[Segment]
+    segments: list[ExportSegment]
     style: StylePreset
     formats: list[str]

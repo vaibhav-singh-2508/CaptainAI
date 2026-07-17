@@ -15,8 +15,11 @@ CUDA note for Windows:
   a hard-coded fallback.
 """
 
+import asyncio
 import logging
 import os
+import shutil
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -173,6 +176,43 @@ def _load_whisper_model() -> tuple:
     return model, "cpu", "int8"
 
 
+# ── Job directory TTL cleanup ─────────────────────────────────────────────────
+
+_JOB_TTL_SECONDS = 30 * 60      # 30 minutes
+_CLEANUP_INTERVAL_SECONDS = 5 * 60  # run every 5 minutes
+
+
+async def _cleanup_old_jobs() -> None:
+    """
+    Background task that deletes job directories older than _JOB_TTL_SECONDS.
+
+    Runs every _CLEANUP_INTERVAL_SECONDS.  Uses asyncio.sleep so it does not
+    block the event loop.  No external scheduler library required.
+    """
+    while True:
+        await asyncio.sleep(_CLEANUP_INTERVAL_SECONDS)
+        tmp_root = Path(config.TMP_DIR)
+        if not tmp_root.exists():
+            continue
+
+        cutoff = time.time() - _JOB_TTL_SECONDS
+        removed = 0
+        for job_dir in tmp_root.iterdir():
+            if not job_dir.is_dir():
+                continue
+            try:
+                mtime = job_dir.stat().st_mtime
+                if mtime < cutoff:
+                    shutil.rmtree(job_dir, ignore_errors=True)
+                    removed += 1
+                    logger.info("Cleanup: removed expired job directory %s", job_dir)
+            except OSError as exc:
+                logger.warning("Cleanup: could not stat/remove %s: %s", job_dir, exc)
+
+        if removed:
+            logger.info("Cleanup run complete: %d job director(y|ies) removed.", removed)
+
+
 # ── FastAPI lifespan ──────────────────────────────────────────────────────────
 
 @asynccontextmanager
@@ -193,9 +233,13 @@ async def lifespan(app: FastAPI):
         config.WHISPER_MODEL_SIZE, device, compute_type,
     )
 
+    # Start background job-directory cleanup task (30-minute TTL)
+    cleanup_task = asyncio.create_task(_cleanup_old_jobs(), name="job-cleanup")
+
     yield
 
     # ── Shutdown ─────────────────────────────────────────────────────────
+    cleanup_task.cancel()
     logger.info("CaptainAI shutdown.")
 
 
