@@ -40,7 +40,13 @@ _SYSTEM_PROMPT = (
 
 _USER_PROMPT_TEMPLATE = """\
 You are processing video subtitle segments. Return a JSON object with these 6 keys.
-CRITICAL: NEVER translate any word from one language to another. If the speaker said a word in Hindi, keep it in Hindi (in Latin/Roman script as transcribed). If they said a word in English, keep it in English. Your ONLY job is fixing grammar, spelling, and removing filler words — you must NOT change the language of any word. Preserve the exact language mix exactly as spoken.
+
+LANGUAGE RULE — THIS IS ABSOLUTE:
+- Copy every word EXACTLY as it appears in the input. Do NOT change any word's script or language.
+- If the input contains Devanagari (Hindi) script, the output MUST also contain Devanagari script — do NOT romanise, transliterate, or translate it.
+- If the input contains English words, keep them as English.
+- You are FORBIDDEN from translating, romanising, or replacing any word.
+- Your ONLY permitted edits: remove filler words (um, uh, like, you know), fix obvious punctuation, and remove duplicate words.
 
 INPUT SEGMENTS:
 {segments_json}
@@ -48,8 +54,10 @@ INPUT SEGMENTS:
 REQUIRED OUTPUT (JSON object, all 6 keys mandatory):
 1. "corrected_segments" - array with one entry per input segment (ALL IDs, same order):
    [{{"id": 1, "corrected_text": "fixed text"}}, {{"id": 2, "corrected_text": "fixed text"}}, ...]
-   Fix grammar, remove filler words (um, uh, like, you know). Keep meaning unchanged.
-   For Hinglish (mixed Hindi+English): keep the natural mix, do NOT force a single language.
+   Rules for corrected_text:
+   - Keep ALL Devanagari script unchanged. Example: if input is "आग्रा के ताज महल" the output must be "आग्रा के ताज महल".
+   - Keep ALL English words unchanged.
+   - Only remove filler words and fix punctuation.
 
 2. "language_profile" - one object describing the content globally:
    {{"primary_language": "en"|"hi"|"hi-en", "secondary_language": null, "contains_code_switching": true|false}}
@@ -149,6 +157,18 @@ def _build_fallback(segments: list[dict], reason: str) -> dict:
     }
 
 
+# ── Script helpers ────────────────────────────────────────────────────────────
+
+def _has_devanagari(text: str) -> bool:
+    """Return True if *text* contains at least one Devanagari Unicode character.
+
+    Devanagari block: U+0900–U+097F (covers Hindi, Marathi, Sanskrit, Nepali).
+    Used as a safety guard to detect when Granite has silently romanised or
+    translated a Hindi segment.
+    """
+    return any('\u0900' <= ch <= '\u097f' for ch in text)
+
+
 # ── Schema validator ──────────────────────────────────────────────────────────
 
 _VALID_GENRE_LABELS = {"study", "talk", "song", "vlog"}
@@ -201,6 +221,22 @@ def _validate_and_normalise(data: Any, segment_ids: set[int], segments: list[dic
                 "corrected_text": segment_lookup[missing_id],
             })
         data["corrected_segments"] = corrected
+
+    # Script-preservation safety net: if Granite returned a corrected_text that
+    # lost all Devanagari characters when the original had them, it translated or
+    # romanised the segment — reject it and fall back to raw Whisper text.
+    segment_text_lookup = {seg["id"]: seg["text"] for seg in segments}
+    for item in data["corrected_segments"]:
+        seg_id = int(item["id"])
+        original_text = segment_text_lookup.get(seg_id, "")
+        corrected_text = item.get("corrected_text", "")
+        if _has_devanagari(original_text) and not _has_devanagari(corrected_text):
+            logger.warning(
+                "[LANG-DIAG] Granite removed Devanagari from segment %d "
+                "(original=%r corrected=%r) — restoring raw Whisper text",
+                seg_id, original_text, corrected_text,
+            )
+            item["corrected_text"] = original_text
 
     # language_profile
     lp = data["language_profile"]
@@ -257,7 +293,25 @@ def _validate_and_normalise(data: Any, segment_ids: set[int], segments: list[dic
 
 async def process(segments: list[dict], job_dir: str) -> dict:
     """
-    Send *segments* to Granite and return the structured result dict.
+    Send *segments* to Granite for grammar correction ONLY and return the
+    structured result dict.
+
+    Pipeline stage: CORRECTION ONLY — this function NEVER translates.
+    Translation is a separate, explicit stage in process.py that only runs
+    when subtitle_output == "en".
+
+    Two-stage architecture:
+        Stage 1 (this function): correct_transcript
+            Granite fixes punctuation, removes filler words, preserves language.
+            The script-preservation safety net in _validate_and_normalise
+            restores raw Whisper text for any segment where Granite removed
+            Devanagari characters (i.e. translated/romanised despite instructions).
+
+        Stage 2 (translator.py, only when subtitle_output=="en"):
+            translate_segments_to_english — explicit Hindi→English translation.
+
+        # TODO: subtitle_output == "hi" (English → Hindi translation)
+        #       Add a translate_segments_to_hindi() call here in a future pass.
 
     The result is also persisted to ``{job_dir}/granite_result.json``.
 
@@ -283,19 +337,18 @@ async def process(segments: list[dict], job_dir: str) -> dict:
     result: dict
     try:
         logger.info(
-            "Calling Granite (%s) via Ollama at %s — %d segments",
-            config.OLLAMA_MODEL, config.OLLAMA_URL, len(segments),
+            "[LANG-DIAG] Calling Granite (%s) for CORRECTION ONLY — %d segments",
+            config.OLLAMA_MODEL, len(segments),
         )
         raw_result = _call_ollama(prompt_segments_json)
         result = _validate_and_normalise(raw_result, segment_ids, segments)
         logger.info(
-            "Granite response OK — genre=%s confidence=%.2f style=%s "
-            "code_switching=%s keywords=%d",
+            "[LANG-DIAG] Granite correction OK — genre=%s style=%s "
+            "primary_language=%s code_switching=%s",
             result["genre"]["label"],
-            result["genre"]["confidence"],
             result["style_preset"],
+            result["language_profile"].get("primary_language"),
             result["language_profile"].get("contains_code_switching"),
-            len(result.get("keywords", [])),
         )
     except RuntimeError as exc:
         reason = exc.args[0].encode("ascii", errors="replace").decode("ascii") if exc.args else str(type(exc))

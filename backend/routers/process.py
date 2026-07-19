@@ -68,12 +68,23 @@ def _load_job_config(job_dir: Path) -> dict:
     config_path = job_dir / "job_config.json"
     defaults = {"spoken_language": "auto", "subtitle_output": "original"}
     if not config_path.exists():
+        logger.warning(
+            "[LANG-DIAG] job_config.json NOT FOUND at %s — falling back to defaults %s",
+            config_path, defaults,
+        )
         return defaults
     try:
-        data = json.loads(config_path.read_text(encoding="utf-8"))
-        return {**defaults, **data}
-    except Exception:
-        logger.warning("Could not read job_config.json — using defaults")
+        raw = config_path.read_text(encoding="utf-8")
+        logger.info("[LANG-DIAG] job_config.json raw content: %s", raw.strip())
+        data = json.loads(raw)
+        merged = {**defaults, **data}
+        logger.info("[LANG-DIAG] Loaded job config: %s", merged)
+        return merged
+    except Exception as exc:
+        logger.warning(
+            "[LANG-DIAG] Could not read job_config.json (%s) — using defaults %s",
+            exc, defaults,
+        )
         return defaults
 
 
@@ -117,8 +128,8 @@ async def _run_pipeline(app_state, job_id: str) -> None:
         whisper_lang = _whisper_language(spoken_language)
 
         logger.info(
-            "[%s] language config: spoken_language=%s subtitle_output=%s",
-            job_id, spoken_language, subtitle_output,
+            "[%s] [LANG-DIAG] Process API loaded: spoken_language=%r subtitle_output=%r → whisper_lang=%r",
+            job_id, spoken_language, subtitle_output, whisper_lang,
         )
 
         # ── 1. Locate the uploaded file ───────────────────────────────────
@@ -152,6 +163,10 @@ async def _run_pipeline(app_state, job_id: str) -> None:
         try:
             # Pass whisper_lang so the user's spoken language choice is respected.
             # None = auto-detect (default); "en"/"hi" = forced language.
+            logger.info(
+                "[%s] [LANG-DIAG] Language passed to transcriber: language=%r task=transcribe",
+                job_id, whisper_lang,
+            )
             segments = await transcriber.transcribe(
                 audio_wav, str(job_dir), language=whisper_lang
             )
@@ -175,8 +190,13 @@ async def _run_pipeline(app_state, job_id: str) -> None:
         )
 
         # ── 5. Subtitle composition (pct=75) ──────────────────────────────
-        # Compose subtitles from the ORIGINAL corrected segments first.
-        # Translation (if requested) happens AFTER composition.
+        # TWO-STAGE ARCHITECTURE:
+        #   Stage 1 (here): compose from CORRECTED (same-language) segments.
+        #     granite_processor.process() only corrects — it NEVER translates.
+        #   Stage 2 (step 6 below): translate ONLY when subtitle_output=="en".
+        #
+        # subtitle_data.json written here always contains the original language.
+        # If translation runs, save_subtitles() overwrites it with English.
         set_stage("composing_subtitles", 75)
 
         try:
@@ -187,10 +207,16 @@ async def _run_pipeline(app_state, job_id: str) -> None:
             set_error(f"Subtitle composition failed: {exc}")
             return
 
+        logger.info(
+            "[%s] [LANG-DIAG] Subtitles composed (%d segments). "
+            "subtitle_output=%r — translation will %s.",
+            job_id, len(subtitles), subtitle_output,
+            "run next" if subtitle_output == "en" else "NOT run",
+        )
+
         # ── 6. Optional: Hindi → English translation (pct=88) ─────────────
-        # Determine the actual spoken language.  When spoken_language="auto",
-        # Whisper will have detected the language — check what it found in
-        # the granite result's language_profile.
+        # Translation ONLY happens here, NEVER inside granite_processor.
+        # Gate: subtitle_output must be "en" AND spoken language must be Hindi.
         actual_language = _resolve_actual_language(
             spoken_language, granite_result
         )
@@ -199,10 +225,16 @@ async def _run_pipeline(app_state, job_id: str) -> None:
             and actual_language == "hi"
         )
 
+        logger.info(
+            "[%s] [LANG-DIAG] Translation gate: subtitle_output=%r "
+            "actual_language=%r → should_translate=%s",
+            job_id, subtitle_output, actual_language, should_translate,
+        )
+
         if should_translate:
             set_stage("translating", 88)
             logger.info(
-                "[%s] Translating subtitles Hindi → English (%d segments)",
+                "[%s] [LANG-DIAG] Translating subtitles Hindi → English (%d segments)",
                 job_id, len(subtitles),
             )
             subtitles = await loop.run_in_executor(
@@ -219,9 +251,20 @@ async def _run_pipeline(app_state, job_id: str) -> None:
             # User asked for English output but the video is already English
             # (or undetected). No translation needed — log for clarity.
             logger.info(
-                "[%s] subtitle_output=en but actual_language=%s — no translation needed",
+                "[%s] [LANG-DIAG] subtitle_output=en but actual_language=%s "
+                "— skipping translation (not Hindi)",
                 job_id, actual_language,
             )
+        else:
+            # subtitle_output == "original" — subtitles already in spoken language
+            logger.info(
+                "[%s] [LANG-DIAG] subtitle_output=original — no translation. "
+                "Subtitles preserved in original language (%s).",
+                job_id, actual_language,
+            )
+
+        # TODO: subtitle_output == "hi" (English → Hindi translation)
+        #       Add translate_segments_to_hindi() call here in a future pass.
 
         # ── 7. Done — ready with all artefacts ────────────────────────────
         set_stage(

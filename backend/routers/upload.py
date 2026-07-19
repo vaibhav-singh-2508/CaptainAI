@@ -11,6 +11,7 @@ POST /upload
 """
 
 import json
+import logging
 import uuid
 from pathlib import Path
 from typing import Literal
@@ -21,6 +22,8 @@ from fastapi.responses import JSONResponse
 
 import config
 from services import validator
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -48,6 +51,10 @@ async def upload_file(
         200: { "job_id": str, "filename": str, "duration_seconds": float }
         422: Validation error (bad extension, oversized, corrupted, etc.)
     """
+    logger.info(
+        "[LANG-DIAG] Upload API received: spoken_language=%r subtitle_output=%r file=%r",
+        spoken_language, subtitle_output, file.filename,
+    )
     # Validate language fields
     valid_spoken = {"auto", "en", "hi"}
     valid_output = {"original", "en"}
@@ -131,8 +138,11 @@ async def upload_file(
         "spoken_language": spoken_language,
         "subtitle_output": subtitle_output,
     }
-    (job_dir / "job_config.json").write_text(
-        json.dumps(job_config, indent=2), encoding="utf-8"
+    config_path = job_dir / "job_config.json"
+    config_path.write_text(json.dumps(job_config, indent=2), encoding="utf-8")
+    logger.info(
+        "[LANG-DIAG] Saved to job_config.json (%s): %s",
+        config_path, job_config,
     )
 
     return {

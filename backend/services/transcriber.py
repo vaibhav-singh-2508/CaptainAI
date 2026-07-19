@@ -58,6 +58,11 @@ def _transcribe_sync(audio_path: str, language: str | None = None) -> list[dict]
     if _model is None:
         raise RuntimeError("Whisper model has not been loaded. Check app startup.")
 
+    logger.info(
+        "[LANG-DIAG] Whisper called with: language=%r task=transcribe",
+        language,
+    )
+
     segments_iter, info = _model.transcribe(
         audio_path,
         language=language,      # None = auto-detect; "en"/"hi" = forced
@@ -68,7 +73,7 @@ def _transcribe_sync(audio_path: str, language: str | None = None) -> list[dict]
 
     detected_lang = info.language
     logger.info(
-        "Whisper detected language: %s (probability %.2f)",
+        "[LANG-DIAG] Whisper detected language: %s (probability %.2f)",
         detected_lang,
         info.language_probability,
     )
