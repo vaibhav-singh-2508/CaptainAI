@@ -76,24 +76,30 @@ def burn_subtitles(
         output_path,
     ]
 
-    logger.info(
-        "FFmpeg burn-in starting: output=%s style=%r",
-        output_path, force_style,
-    )
-    logger.debug("FFmpeg command: %s", " ".join(cmd))
+    logger.info("FFmpeg burn-in starting:")
+    logger.info("  input  : %s", video_path)
+    logger.info("  srt    : %s", srt_path)
+    logger.info("  output : %s", output_path)
+    logger.info("  vf     : %s", vf_filter)
+    logger.info("  cmd    : %s", " ".join(cmd))
 
     result = subprocess.run(
         cmd,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
     )
 
     if result.returncode != 0:
-        stderr_snippet = result.stderr[-2000:] if result.stderr else "(no stderr)"
-        logger.error("FFmpeg burn-in failed (rc=%d):\n%s", result.returncode, stderr_snippet)
+        stderr_full = result.stderr if result.stderr else "(no stderr)"
+        logger.error(
+            "FFmpeg burn-in failed (rc=%d):\n%s",
+            result.returncode, stderr_full,
+        )
         raise RuntimeError(
             f"FFmpeg burn-in failed (exit code {result.returncode}). "
-            f"FFmpeg stderr: {stderr_snippet}"
+            f"FFmpeg stderr: {stderr_full}"
         )
 
     logger.info("FFmpeg burn-in complete: %s", output_path)

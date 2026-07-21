@@ -165,9 +165,20 @@ def _write_txt(segments: list, output_path: Path) -> None:
     logger.info("TXT written: %s (%d entries)", output_path, len(segments))
 
 
+# Extensions that contain a real video stream and support subtitle burn-in.
+# Audio-only formats (.mp3, .wav, .m4a) are excluded — FFmpeg cannot burn
+# subtitles into an audio file; MP3 embedded cover-art is not a video stream.
+_VIDEO_EXTENSIONS = (".mp4", ".mov", ".webm")
+
+
 def _find_original_video(job_dir: Path) -> Path | None:
-    """Return the path to the original uploaded video file, or None."""
-    for ext in (".mp4", ".mov", ".webm", ".mp3", ".wav", ".m4a"):
+    """Return the path to the original uploaded VIDEO file, or None.
+
+    Audio-only originals (.mp3, .wav, .m4a) return None — MP4 burn-in
+    requires a real video stream.  An MP3's embedded cover-art image is
+    not a valid video source for libx264 encoding.
+    """
+    for ext in _VIDEO_EXTENSIONS:
         candidate = job_dir / f"original{ext}"
         if candidate.exists():
             return candidate
@@ -248,8 +259,22 @@ async def export(job_id: str, request: ExportRequest):
 
     # ── 3. MP4 burn-in ───────────────────────────────────────────────────────
     if "mp4" in formats:
+        # Check whether any audio-only original exists so we can return a
+        # clear user-facing message instead of a cryptic FFmpeg error.
+        has_audio_only = any(
+            (job_dir / f"original{ext}").exists()
+            for ext in (".mp3", ".wav", ".m4a")
+        )
         original_video = _find_original_video(job_dir)
         if original_video is None:
+            if has_audio_only:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "MP4 export is not available for audio-only uploads (MP3/WAV/M4A). "
+                        "Please download the SRT file and add subtitles in a video editor."
+                    ),
+                )
             raise HTTPException(
                 status_code=404,
                 detail="Original video file not found for this job. Cannot burn subtitles.",
